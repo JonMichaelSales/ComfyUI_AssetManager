@@ -11,7 +11,8 @@ Repository = "https://github.com/JonMichaelSales/ComfyUI_AssetManager"
 Issues = "https://github.com/JonMichaelSales/ComfyUI_AssetManager/issues"
 
 [tool.comfy]
-PublisherId = "REPLACE-ME"
+PublisherId = "jonmsales"
 DisplayName = "ComfyUI Asset Browser"
 Icon = ""
+
 
