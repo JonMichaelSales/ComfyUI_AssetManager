@@ -224,14 +224,143 @@ function cabRender() {
 async function cabDetail(id) {
   try {
     const asset = await cabApi(`/asset-browser/assets/${encodeURIComponent(id)}`);
+    const summary = cabBuildAssetSummary(asset);
     const backdrop = document.createElement("div");
     backdrop.className = "cab-backdrop";
-    backdrop.innerHTML = `<div class="cab-dialog"><img src="${cabEscape(asset.view_url)}" alt=""><div><h3>${cabEscape(asset.filename)}</h3><p>${cabEscape(asset.model_name || "")}</p><pre>${cabEscape(JSON.stringify(asset.metadata || {}, null, 2))}</pre><button>Close</button></div></div>`;
-    backdrop.addEventListener("click", (event) => { if (event.target === backdrop || event.target.tagName === "BUTTON") backdrop.remove(); });
+    backdrop.innerHTML = `
+      <div class="cab-dialog cab-detail-dialog">
+        <div class="cab-preview-pane">
+          <img src="${cabEscape(asset.view_url)}" alt="">
+        </div>
+        <div class="cab-detail-pane">
+          <header class="cab-detail-header">
+            <div>
+              <h3>${cabEscape(asset.filename)}</h3>
+              <p>${cabEscape(summary.subtitle)}</p>
+            </div>
+            <button data-action="close-detail">Close</button>
+          </header>
+          <section class="cab-section">
+            <h4>File</h4>
+            <div class="cab-field-grid">${cabFieldsHtml(summary.file)}</div>
+          </section>
+          <section class="cab-section">
+            <h4>Generation</h4>
+            <div class="cab-field-grid">${cabFieldsHtml(summary.generation)}</div>
+          </section>
+          <section class="cab-section">
+            <h4>Workflow</h4>
+            <div class="cab-field-grid">${cabFieldsHtml(summary.workflow)}</div>
+          </section>
+          ${summary.loras.length ? `<section class="cab-section"><h4>LoRAs</h4><div class="cab-chip-list">${summary.loras.map((lora) => `<span>${cabEscape(lora)}</span>`).join("")}</div></section>` : ""}
+          ${summary.prompts.positive || summary.prompts.negative ? `<section class="cab-section"><h4>Prompts</h4>${summary.prompts.positive ? `<label>Positive</label><pre class="cab-prompt-text">${cabEscape(summary.prompts.positive)}</pre>` : ""}${summary.prompts.negative ? `<label>Negative</label><pre class="cab-prompt-text">${cabEscape(summary.prompts.negative)}</pre>` : ""}</section>` : ""}
+          <details class="cab-raw-json">
+            <summary>Raw metadata JSON</summary>
+            <pre>${cabEscape(JSON.stringify({ metadata: asset.metadata || {}, prompt: asset.prompt || null }, null, 2))}</pre>
+          </details>
+        </div>
+      </div>`;
+    backdrop.addEventListener("click", (event) => {
+      if (event.target === backdrop || event.target.dataset.action === "close-detail") backdrop.remove();
+    });
     document.body.appendChild(backdrop);
-  } catch (error) { cabStatus(error.message || String(error)); }
+  } catch (error) {
+    cabStatus(error.message || String(error));
+  }
 }
 
+function cabBuildAssetSummary(asset) {
+  const promptGraph = cabPromptGraph(asset.prompt);
+  const promptTexts = cabExtractPrompts(promptGraph);
+  const dimensions = asset.width && asset.height ? `${asset.width} x ${asset.height}` : "-";
+  const batchSize = cabFindInput(promptGraph, ["batch_size"]) || "-";
+  return {
+    subtitle: asset.model_name || asset.format || "Generated asset",
+    file: [
+      ["Filename", asset.filename],
+      ["Folder", asset.subfolder || "output root"],
+      ["Format", asset.format ? String(asset.format).toUpperCase() : "-"],
+      ["Dimensions", dimensions],
+      ["Size", cabFormatBytes(asset.size)],
+      ["Modified", cabFormatNsDate(asset.modified)],
+    ],
+    generation: [
+      ["Model", asset.model_name || cabFindInput(promptGraph, ["ckpt_name", "model_name", "unet_name"]) || "-"],
+      ["Sampler", asset.sampler_name || cabFindInput(promptGraph, ["sampler_name"]) || "-"],
+      ["Scheduler", cabFindInput(promptGraph, ["scheduler"]) || "-"],
+      ["Steps", asset.steps ?? cabFindInput(promptGraph, ["steps"]) ?? "-"],
+      ["CFG", asset.cfg ?? cabFindInput(promptGraph, ["cfg"]) ?? "-"],
+      ["Seed", asset.seed ?? cabFindInput(promptGraph, ["seed", "noise_seed"]) ?? "-"],
+      ["Batch Size", batchSize],
+      ["Duration", asset.duration_sec ? `${Number(asset.duration_sec).toFixed(1)}s` : "Not embedded"],
+    ],
+    workflow: [
+      ["Workflow Embedded", asset.has_workflow ? "Yes" : "No"],
+      ["Prompt Embedded", asset.has_prompt ? "Yes" : "No"],
+      ["Workflow Hash", asset.workflow_hash ? String(asset.workflow_hash).slice(0, 16) : "-"],
+      ["Node Count", promptGraph ? Object.keys(promptGraph).length : "-"],
+    ],
+    loras: Array.isArray(asset.lora_names) ? asset.lora_names : [],
+    prompts: promptTexts,
+  };
+}
+
+function cabFieldsHtml(rows) {
+  return rows.map(([label, value]) => `
+    <div class="cab-field">
+      <span>${cabEscape(label)}</span>
+      <strong title="${cabEscape(value)}">${cabEscape(value ?? "-")}</strong>
+    </div>
+  `).join("");
+}
+
+function cabPromptGraph(prompt) {
+  if (!prompt) return null;
+  if (prompt.prompt && typeof prompt.prompt === "object") return prompt.prompt;
+  return typeof prompt === "object" ? prompt : null;
+}
+
+function cabExtractPrompts(graph) {
+  const out = { positive: "", negative: "" };
+  if (!graph) return out;
+  for (const node of Object.values(graph)) {
+    if (!node || typeof node !== "object") continue;
+    const inputs = node.inputs || {};
+    const text = inputs.text || inputs.positive || inputs.negative || inputs.prompt;
+    if (typeof text !== "string" || !text.trim()) continue;
+    const title = String(node?._meta?.title || node.class_type || "").toLowerCase();
+    if (!out.negative && title.includes("negative")) out.negative = text;
+    else if (!out.positive && (title.includes("positive") || node.class_type === "CLIPTextEncode")) out.positive = text;
+  }
+  return out;
+}
+
+function cabFindInput(graph, keys) {
+  if (!graph) return null;
+  for (const node of Object.values(graph)) {
+    if (!node || typeof node !== "object") continue;
+    const inputs = node.inputs || {};
+    for (const key of keys) {
+      const value = inputs[key];
+      if (value !== undefined && value !== null && !Array.isArray(value)) return value;
+    }
+  }
+  return null;
+}
+
+function cabFormatBytes(bytes) {
+  const value = Number(bytes);
+  if (!Number.isFinite(value) || value <= 0) return "-";
+  if (value < 1024) return `${value} B`;
+  if (value < 1024 * 1024) return `${(value / 1024).toFixed(1)} KB`;
+  return `${(value / 1024 / 1024).toFixed(1)} MB`;
+}
+
+function cabFormatNsDate(ns) {
+  const value = Number(ns);
+  if (!Number.isFinite(value) || value <= 0) return "-";
+  return new Date(value / 1_000_000).toLocaleString();
+}
 async function cabScan() {
   try { await cabApi("/asset-browser/scan", { method: "POST" }); cabStatus("Scan started"); }
   catch (error) { cabStatus(error.message || String(error)); }
@@ -265,7 +394,7 @@ function cabStyles() {
     .cab-actions, .cab-footer div{display:flex;gap:6px}.cab-panel button,.cab-panel select,.cab-panel input{border:1px solid rgba(255,255,255,.14);border-radius:6px;background:#101318;color:#f4f7fb;min-height:30px}.cab-panel button{background:#262b33;cursor:pointer;padding:0 10px}
     .cab-filters{display:grid;gap:8px;padding:10px 12px;border-bottom:1px solid rgba(255,255,255,.08)}.cab-filters input{box-sizing:border-box;width:100%;padding:0 9px}.cab-filter-row{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:6px}.cab-filter-row select{min-width:0;width:100%}
     .cab-grid{min-height:0;overflow-y:auto;overflow-x:hidden;padding:10px 12px 14px;display:grid;grid-template-columns:repeat(var(--cab-cols),minmax(0,1fr));grid-auto-rows:var(--cab-h);gap:10px;align-content:start}.cab-card{height:var(--cab-h)!important;padding:0;overflow:hidden;background:#05070a;border:1px solid rgba(255,255,255,.12);border-radius:7px}.cab-card img{display:block;width:100%;height:100%;object-fit:contain}.cab-empty{grid-column:1/-1;color:#aeb7c4;padding:30px 8px;text-align:center}
-    .cab-backdrop{position:fixed;inset:0;z-index:300001;background:rgba(0,0,0,.5);display:grid;place-items:center;padding:22px}.cab-dialog{width:min(920px,96vw);max-height:92vh;display:grid;grid-template-columns:minmax(260px,42%) 1fr;background:#191c21;color:#e8edf4;border:1px solid rgba(255,255,255,.16);border-radius:8px;overflow:hidden}.cab-dialog img{width:100%;max-height:88vh;object-fit:contain;background:#05070a}.cab-dialog div{padding:12px;overflow:auto}.cab-dialog pre{max-height:55vh;overflow:auto;white-space:pre-wrap;overflow-wrap:anywhere;background:#05070a;padding:8px;border-radius:6px}
+    .cab-backdrop{position:fixed;inset:0;z-index:300001;background:rgba(0,0,0,.55);display:grid;place-items:center;padding:22px}.cab-dialog{width:min(1120px,96vw);max-height:92vh;display:grid;grid-template-columns:minmax(300px,44%) 1fr;background:#191c21;color:#e8edf4;border:1px solid rgba(255,255,255,.16);border-radius:8px;overflow:hidden}.cab-preview-pane{min-height:0;background:#05070a;display:grid;place-items:center}.cab-dialog img{width:100%;height:100%;max-height:92vh;object-fit:contain;background:#05070a}.cab-detail-pane{padding:14px 16px;overflow:auto}.cab-detail-header{display:flex;justify-content:space-between;align-items:start;gap:12px;margin-bottom:12px}.cab-detail-header h3{margin:0 0 4px;font-size:18px}.cab-detail-header p{margin:0;color:#aeb7c4}.cab-section{border-top:1px solid rgba(255,255,255,.1);padding:12px 0}.cab-section h4{margin:0 0 10px;font-size:13px;color:#d6dde8}.cab-field-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px}.cab-field{min-width:0;border:1px solid rgba(255,255,255,.1);border-radius:6px;background:#11151b;padding:8px}.cab-field span{display:block;color:#95a0af;font-size:11px;margin-bottom:3px}.cab-field strong{display:block;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-weight:600}.cab-chip-list{display:flex;flex-wrap:wrap;gap:6px}.cab-chip-list span{border:1px solid rgba(255,255,255,.14);border-radius:999px;background:#11151b;padding:4px 8px}.cab-section label{display:block;color:#95a0af;font-size:11px;margin:8px 0 4px}.cab-prompt-text,.cab-raw-json pre{max-height:210px;overflow:auto;white-space:pre-wrap;overflow-wrap:anywhere;background:#05070a;padding:10px;border-radius:6px;border:1px solid rgba(255,255,255,.08)}.cab-raw-json{border-top:1px solid rgba(255,255,255,.1);padding:12px 0}.cab-raw-json summary{cursor:pointer;color:#c8d1df}.cab-raw-json pre{max-height:320px}.cab-detail-header button{border:1px solid rgba(255,255,255,.14);border-radius:6px;background:#262b33;color:#f4f7fb;min-height:30px;padding:0 10px;cursor:pointer}@media(max-width:820px){.cab-dialog{grid-template-columns:1fr}.cab-preview-pane{max-height:45vh}.cab-field-grid{grid-template-columns:1fr}}
   `;
   document.head.appendChild(style);
 }
@@ -276,3 +405,4 @@ app.registerExtension({
     if (!cabRegisterSidebar()) cabMountFallback();
   },
 });
+
