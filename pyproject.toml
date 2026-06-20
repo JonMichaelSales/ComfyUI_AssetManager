@@ -1,0 +1,16 @@
+[project]
+name = "comfyui-asset-browser"
+description = "Browse, search, inspect, and reload workflows from generated ComfyUI output images."
+version = "0.1.0"
+license = { file = "LICENSE" }
+requires-python = ">=3.10"
+dependencies = []
+
+[project.urls]
+Repository = "https://github.com/REPLACE-ME/ComfyUI-Asset-Browser"
+Issues = "https://github.com/REPLACE-ME/ComfyUI-Asset-Browser/issues"
+
+[tool.comfy]
+PublisherId = "REPLACE-ME"
+DisplayName = "ComfyUI Asset Browser"
+Icon = ""

@@ -1,0 +1,1 @@
+# No extra runtime dependencies. Uses ComfyUI's existing Pillow installation.
