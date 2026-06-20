@@ -1,3 +1,5 @@
+import { app } from "../../scripts/app.js";
+
 const CAB_STATE = {
   open: false,
   offset: 0,
@@ -30,30 +32,20 @@ function cabApi(path, options) {
   });
 }
 
-function cabMount() {
-  if (document.getElementById("cab-launcher")) return;
-  if (!document.body) {
-    window.addEventListener("DOMContentLoaded", cabMount, { once: true });
-    return;
-  }
+function cabRenderPanel(parent, embedded = false) {
   cabStyles();
-
-  const launcher = document.createElement("button");
-  launcher.id = "cab-launcher";
-  launcher.className = "cab-toggle";
-  launcher.textContent = "Assets";
-  launcher.title = "Open asset browser";
-  document.body.appendChild(launcher);
+  const existing = parent.querySelector?.(".cab-panel");
+  if (existing) existing.remove();
 
   const panel = document.createElement("section");
-  panel.id = "cab-panel";
-  panel.className = "cab-panel cab-size-medium";
+  panel.id = embedded ? "cab-sidebar-panel" : "cab-panel";
+  panel.className = `cab-panel ${embedded ? "cab-sidebar cab-open" : ""} cab-size-medium`;
   panel.innerHTML = `
     <div class="cab-header">
       <strong>Assets</strong>
       <div class="cab-actions">
         <button data-action="scan">Scan</button>
-        <button data-action="close">x</button>
+        <button data-action="close" ${embedded ? "hidden" : ""}>x</button>
       </div>
     </div>
     <div class="cab-filters">
@@ -73,15 +65,10 @@ function cabMount() {
     <div class="cab-grid"></div>
     <div class="cab-footer"><span class="cab-status">Ready</span><div><button data-action="less">Less</button><button data-action="more">More</button></div></div>
   `;
-  document.body.appendChild(panel);
+  parent.appendChild(panel);
   CAB_STATE.panel = panel;
 
-  launcher.addEventListener("click", () => {
-    CAB_STATE.open = !CAB_STATE.open;
-    panel.classList.toggle("cab-open", CAB_STATE.open);
-    if (CAB_STATE.open && !CAB_STATE.assets.length) cabLoadAssets(true);
-  });
-  panel.querySelector('[data-action="close"]').addEventListener("click", () => {
+  panel.querySelector('[data-action="close"]')?.addEventListener("click", () => {
     CAB_STATE.open = false;
     panel.classList.remove("cab-open");
   });
@@ -100,8 +87,47 @@ function cabMount() {
     });
   }
   cabApplySize();
+  if (embedded) cabLoadAssets(true);
+  return panel;
 }
 
+function cabMountFallback() {
+  if (document.getElementById("cab-launcher")) return;
+  if (!document.body) {
+    window.addEventListener("DOMContentLoaded", cabMountFallback, { once: true });
+    return;
+  }
+  const launcher = document.createElement("button");
+  launcher.id = "cab-launcher";
+  launcher.className = "cab-toggle";
+  launcher.textContent = "Assets";
+  launcher.title = "Open asset browser";
+  document.body.appendChild(launcher);
+  const panel = cabRenderPanel(document.body, false);
+  launcher.addEventListener("click", () => {
+    CAB_STATE.open = !CAB_STATE.open;
+    panel.classList.toggle("cab-open", CAB_STATE.open);
+    if (CAB_STATE.open && !CAB_STATE.assets.length) cabLoadAssets(true);
+  });
+}
+
+function cabRegisterSidebar() {
+  if (app?.extensionManager?.registerSidebarTab) {
+    app.extensionManager.registerSidebarTab({
+      id: "jonmsales.asset-browser",
+      icon: "pi pi-images",
+      title: "Assets",
+      tooltip: "Asset Browser",
+      type: "custom",
+      render: (el) => {
+        el.style.height = "100%";
+        cabRenderPanel(el, true);
+      },
+    });
+    return true;
+  }
+  return false;
+}
 function cabParams(includePaging = true) {
   const params = new URLSearchParams();
   if (includePaging) {
@@ -234,7 +260,7 @@ function cabStyles() {
   style.textContent = `
     .cab-toggle{position:fixed;left:48px;top:45%;z-index:300000;width:38px;height:108px;border:1px solid #3a414c;border-radius:6px;background:#20242b;color:#e8edf4;writing-mode:vertical-rl;cursor:pointer;font:12px system-ui,sans-serif;letter-spacing:0}
     .cab-panel{position:fixed;z-index:299999;top:0;left:0;bottom:0;width:min(430px,calc(100vw - 48px));display:grid;grid-template-rows:auto auto 1fr auto;transform:translateX(-105%);transition:transform .16s ease;background:#191c21;color:#e8edf4;border-right:1px solid rgba(255,255,255,.12);box-shadow:10px 0 34px rgba(0,0,0,.36);font:13px/1.35 system-ui,sans-serif;--cab-cols:2;--cab-h:132px}
-    .cab-panel.cab-open{transform:translateX(0)}.cab-size-small{--cab-cols:3;--cab-h:86px}.cab-size-medium{--cab-cols:2;--cab-h:132px}.cab-size-large{--cab-cols:1;--cab-h:260px}
+    .cab-panel.cab-open{transform:translateX(0)}.cab-panel.cab-sidebar{position:relative;inset:auto;z-index:auto;width:100%;height:100%;transform:none;transition:none;box-shadow:none;border-right:0;background:transparent}.cab-sidebar .cab-header{padding-top:12px}.cab-size-small{--cab-cols:3;--cab-h:86px}.cab-size-medium{--cab-cols:2;--cab-h:132px}.cab-size-large{--cab-cols:1;--cab-h:260px}
     .cab-header,.cab-footer{display:flex;align-items:center;justify-content:space-between;gap:8px;padding:10px 12px;border-bottom:1px solid rgba(255,255,255,.1)}.cab-footer{border-top:1px solid rgba(255,255,255,.1);border-bottom:0;color:#aeb7c4}
     .cab-actions, .cab-footer div{display:flex;gap:6px}.cab-panel button,.cab-panel select,.cab-panel input{border:1px solid rgba(255,255,255,.14);border-radius:6px;background:#101318;color:#f4f7fb;min-height:30px}.cab-panel button{background:#262b33;cursor:pointer;padding:0 10px}
     .cab-filters{display:grid;gap:8px;padding:10px 12px;border-bottom:1px solid rgba(255,255,255,.08)}.cab-filters input{box-sizing:border-box;width:100%;padding:0 9px}.cab-filter-row{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:6px}.cab-filter-row select{min-width:0;width:100%}
@@ -244,4 +270,9 @@ function cabStyles() {
   document.head.appendChild(style);
 }
 
-cabMount();
+app.registerExtension({
+  name: "JonMSales.AssetBrowser",
+  async init() {
+    if (!cabRegisterSidebar()) cabMountFallback();
+  },
+});
