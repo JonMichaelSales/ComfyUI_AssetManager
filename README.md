@@ -16,7 +16,7 @@ Clone or copy this folder into a ComfyUI custom nodes directory:
 
 ```powershell
 cd F:\ComfyFiles\custom_nodes
-git clone https://github.com/REPLACE-ME/ComfyUI-Asset-Browser
+git clone https://github.com/JonMichaelSales/ComfyUI_AssetManager
 ```
 
 Restart ComfyUI. A startup background scan runs once, and the Assets panel also has a manual Scan button.
@@ -36,7 +36,7 @@ ComfyUI also mirrors these routes under `/api/asset-browser/*`.
 
 Before publishing to Comfy Registry:
 
-1. Replace `REPLACE-ME` values in `pyproject.toml`.
+1. Confirm `PublisherId` and `Icon` values in `pyproject.toml`.
 2. Add a Registry `PublisherId`.
 3. Add the real repository and issue URLs.
 4. Optionally add an icon URL.
@@ -45,3 +45,4 @@ Before publishing to Comfy Registry:
 ## Notes
 
 Existing output images only show workflow loading when they contain embedded workflow metadata. Generation duration is reserved in the database schema but is usually unavailable for older images.
+
